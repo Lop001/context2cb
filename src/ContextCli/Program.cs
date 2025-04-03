@@ -214,7 +214,7 @@ class Program
         Console.WriteLine($"Effective UseGitignore: {config.UseGitignore}");
 
         // 2. Build Glob matcher for ignoring
-        var ignoreMatcher = await BuildIgnoreMatcherAsync(config, cliIgnorePatterns);
+        var ignoreMatchers = await BuildIgnoreMatchersAsync(config, cliIgnorePatterns);
 
         // 3. Prepare HashSet for quick extension checking (case-insensitive)
         var allowedExtensions = new HashSet<string>(config.Extensions ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
@@ -231,9 +231,8 @@ class Program
         Console.WriteLine("Scanning directory structure...");
         await ScanDirectoryRecursiveAsync(
             new DirectoryInfo(Environment.CurrentDirectory),
-            // 0, // Removed
             depth ?? int.MaxValue, // Effective maximum depth
-            ignoreMatcher,
+            ignoreMatchers,
             allowedExtensions,
             config.MaxFileSizeKb * 1024L ?? long.MaxValue, // Max size in bytes
             includedFiles,
@@ -304,7 +303,7 @@ class Program
     /// <summary>
     /// Finds .gitignore files and builds Glob matcher for ignoring.
     /// </summary>
-    private static async Task<Glob?> BuildIgnoreMatcherAsync(CliConfiguration config, string[] cliIgnorePatterns)
+    private static async Task<List<Glob>?> BuildIgnoreMatchersAsync(CliConfiguration config, string[] cliIgnorePatterns)
     {
         var allPatterns = new List<string>();
 
@@ -345,20 +344,44 @@ class Program
             return null; // No patterns to ignore
         }
 
-        // Create Glob matcher instance
-        try
+        // Create individual Glob matcher instances for each pattern
+        var matchers = new List<Glob>();
+        var options = new GlobOptions { Evaluation = { CaseInsensitive = false } };
+        
+        foreach (var pattern in allPatterns)
         {
-            var options = new GlobOptions { Evaluation = { CaseInsensitive = false } }; // Gitignore is case-sensitive on Linux/Mac
-            // On Windows, CaseInsensitive = true might be needed, but for consistency we'll keep it false
-            return Glob.Parse(string.Join("\n", allPatterns), options); // Join patterns with newline for parser
+            try
+            {
+                // Convert gitignore pattern to glob pattern if needed
+                string globPattern = ConvertGitignoreToGlob(pattern);
+                var glob = Glob.Parse(globPattern, options);
+                matchers.Add(glob);
+            }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.Error.WriteLine($"Warning: Failed to parse ignore pattern '{pattern}': {ex.Message}");
+                Console.ResetColor();
+            }
         }
-        catch (Exception ex)
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.Error.WriteLine($"Error: Failed to parse ignore patterns: {ex.Message}");
-            Console.ResetColor();
-            return null; // Return null if parsing fails
-        }
+
+        return matchers.Count > 0 ? matchers : null;
+    }
+
+    /// <summary>
+    /// Converts gitignore pattern to glob pattern
+    /// </summary>
+    private static string ConvertGitignoreToGlob(string pattern)
+    {
+        // Remove leading slash - gitignore uses it for root-relative paths
+        if (pattern.StartsWith("/"))
+            pattern = pattern.Substring(1);
+        
+        // If pattern doesn't start with **, make it relative to root
+        if (!pattern.StartsWith("**/") && !pattern.StartsWith("**\\") && !pattern.Contains("/"))
+            pattern = "**/" + pattern;
+            
+        return pattern;
     }
 
 
@@ -397,15 +420,13 @@ class Program
     /// </summary>
     private static async Task ScanDirectoryRecursiveAsync(
         DirectoryInfo directory,
-        // int currentDepth, // Replaced with parentIsLastStack.Count
         int maxDepth,
-        Glob? ignoreMatcher,
+        List<Glob>? ignoreMatchers,
         HashSet<string> allowedExtensions,
         long maxFileSizeBytes,
         List<FileInfo> includedFiles,
         StringBuilder treeBuilder,
-        List<bool> parentIsLastStack // NEW: Stack of "is last element" state of parents
-        )
+        List<bool> parentIsLastStack)
     {
         int currentDepth = parentIsLastStack.Count; // Current depth
         if (currentDepth > maxDepth) return;
@@ -457,7 +478,21 @@ class Program
 
             string relativePath = Path.GetRelativePath(Environment.CurrentDirectory, item.FullName).Replace(Path.DirectorySeparatorChar, '/');
             string matchPath = item is DirectoryInfo ? relativePath + "/" : relativePath; // Add slash for directories
-            if (ignoreMatcher?.IsMatch(matchPath) ?? false) continue;
+            
+            // Check if path matches any ignore pattern
+            bool isIgnored = false;
+            if (ignoreMatchers != null)
+            {
+                foreach (var matcher in ignoreMatchers)
+                {
+                    if (matcher.IsMatch(matchPath))
+                    {
+                        isIgnored = true;
+                        break;
+                    }
+                }
+            }
+            if (isIgnored) continue;
 
 
             // --- Specific processing for files ---
@@ -513,7 +548,7 @@ class Program
                     subDir,
                     // currentDepth + 1, // Removed
                     maxDepth,
-                    ignoreMatcher,
+                    ignoreMatchers,
                     allowedExtensions,
                     maxFileSizeBytes,
                     includedFiles,
