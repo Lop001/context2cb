@@ -1,0 +1,102 @@
+name: .NET Release Build & Publish
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build-and-publish:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            artifact_suffix: linux-x64
+            archive_format: tar.gz
+          - os: macos-latest
+            rid: osx-x64
+            artifact_suffix: macos-x64
+            archive_format: zip
+          - os: macos-latest
+            rid: osx-arm64
+            artifact_suffix: macos-arm64
+            archive_format: zip
+          # === PŘIDÁNO PRO WINDOWS ===
+          - os: windows-latest  # Runner pro Windows build
+            rid: win-x64        # RID pro Windows x64
+            artifact_suffix: win-x64 # Přípona
+            archive_format: zip       # Formát archivu
+          # === KONEC PŘIDÁNÍ PRO WINDOWS ===
+
+    runs-on: ${{ matrix.os }}
+    name: Build for ${{ matrix.artifact_suffix }}
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x' # Ověř verzi!
+
+    - name: Restore dependencies
+      run: dotnet restore src/ContextCli/ContextCli.csproj # Ověř cestu!
+
+    - name: Publish application
+      # Použijeme powershell pro Windows pro konzistenci proměnných
+      shell: pwsh
+      run: dotnet publish src/ContextCli/ContextCli.csproj -c Release --self-contained true /p:PublishSingleFile=true -r ${{ matrix.rid }} -o ./publish/${{ matrix.rid }}
+      # ^ Ověř cestu!
+
+    # Přejmenování pro Windows (.exe) je ošetřeno v kroku 'Archive output' níže
+    # Pokud bys chtěl explicitní přejmenování jako u Linux/Mac, přidal bys sem krok s 'if: runner.os == 'Windows'' a 'ren'
+
+    - name: Set executable permissions (Linux)
+      if: runner.os == 'Linux'
+      run: chmod +x ./publish/${{ matrix.rid }}/context2cb
+      shell: bash # Explicitně bash pro chmod
+
+    - name: Archive output (ZIP)
+      # Tento krok teď poběží pro macOS i Windows
+      if: matrix.archive_format == 'zip'
+      # Použijeme powershell pro lepší multiplatformní kompatibilitu zipování
+      shell: pwsh
+      run: |
+        $sourceDir = "./publish/${{ matrix.rid }}"
+        $zipFilePath = "./context2cb-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.zip"
+        # Najít soubor context2cb nebo context2cb.exe
+        $executable = Get-ChildItem -Path $sourceDir -Filter context2cb* | Select-Object -First 1
+        if ($null -ne $executable) {
+          Compress-Archive -Path $executable.FullName -DestinationPath $zipFilePath -Force
+        } else {
+          Write-Error "Executable 'context2cb*' not found in $sourceDir"
+          exit 1
+        }
+
+    - name: Archive output (TAR.GZ)
+      # Tento krok poběží jen pro Linux
+      if: matrix.archive_format == 'tar.gz'
+      # Použijeme bash pro tar
+      shell: bash
+      run: |
+        cd ./publish/${{ matrix.rid }}
+        # Najít soubor context2cb
+        executable=$(find . -name 'context2cb' -print -quit)
+        if [ -n "$executable" ]; then
+          tar czvf ../../context2cb-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.tar.gz $executable
+        else
+          echo "Executable 'context2cb' not found in $(pwd)"
+          exit 1
+        fi
+        cd ../../
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./context2cb-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.${{ matrix.archive_format }}
+        asset_name: context2cb-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.${{ matrix.archive_format }}
+        asset_content_type: application/${{ matrix.archive_format == 'zip' && 'zip' || 'gzip' }}
