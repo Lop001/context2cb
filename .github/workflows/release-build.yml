@@ -3,12 +3,14 @@ name: .NET Release Build & Publish
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+*' # Trigger na tagy jako v1.0.0, v1.2.3, v1.2.3-beta1 atd.
+      - 'v[0-9]+.[0-9]+.[0-9]+*' # Trigger na tagy jako v1.0.0, v1.2.3, atd.
 
 permissions:
-  contents: write 
+  contents: write # Potřebné pro vytvoření release a nahrání assets
+
 jobs:
-  build-and-publish:
+  # --- JOB 1: Build pro všechny platformy (Matrix) ---
+  build:
     strategy:
       matrix:
         include:
@@ -16,18 +18,22 @@ jobs:
             rid: linux-x64
             artifact_suffix: linux-x64
             archive_format: tar.gz
+            output_name: context2cb # Název souboru v archivu
           - os: macos-latest
             rid: osx-x64
             artifact_suffix: macos-x64
             archive_format: zip
+            output_name: context2cb
           - os: macos-latest
             rid: osx-arm64
             artifact_suffix: macos-arm64
             archive_format: zip
+            output_name: context2cb
           - os: windows-latest
             rid: win-x64
             artifact_suffix: win-x64
             archive_format: zip
+            output_name: context2cb.exe # Windows má .exe
 
     runs-on: ${{ matrix.os }}
     name: Build for ${{ matrix.artifact_suffix }}
@@ -39,58 +45,83 @@ jobs:
     - name: Setup .NET SDK
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '8.0.x' # Nebo specifická verze
+        dotnet-version: '8.0.x' # Ověř verzi
 
     - name: Restore dependencies
-      run: dotnet restore src/ContextCli/ContextCli.csproj
+      run: dotnet restore src/ContextCli/ContextCli.csproj # Ověř cestu
 
     - name: Publish application
       shell: pwsh
       run: dotnet publish src/ContextCli/ContextCli.csproj -c Release --self-contained true /p:PublishSingleFile=true -r ${{ matrix.rid }} -o ./publish/${{ matrix.rid }}
+      # ^ Ověř cestu
 
     - name: Set executable permissions (Linux)
       if: runner.os == 'Linux'
-      run: chmod +x ./publish/${{ matrix.rid }}/context2cb
+      run: chmod +x ./publish/${{ matrix.rid }}/${{ matrix.output_name }}
       shell: bash
+
+    # Určení názvu a cesty archivu
+    - name: Set Archive Name
+      id: archive_details
+      shell: bash
+      run: |
+        ARCHIVE_NAME="context2cb-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.${{ matrix.archive_format }}"
+        echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
+        SOURCE_PATH="./publish/${{ matrix.rid }}/${{ matrix.output_name }}"
+        echo "SOURCE_PATH=${SOURCE_PATH}" >> $GITHUB_OUTPUT
 
     - name: Archive output (ZIP)
       if: matrix.archive_format == 'zip'
       shell: pwsh
       run: |
-        $sourceDir = "./publish/${{ matrix.rid }}"
-        # Použijeme github.ref_name, což je název tagu (např. v1.0.0)
-        $zipFilePath = "./context2cb-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.zip"
-        $executable = Get-ChildItem -Path $sourceDir -Filter context2cb* | Select-Object -First 1
-        if ($null -ne $executable) {
-          Compress-Archive -Path $executable.FullName -DestinationPath $zipFilePath -Force
-        } else {
-          Write-Error "Executable 'context2cb*' not found in $sourceDir"
-          exit 1
-        }
+        Compress-Archive -Path "${{ steps.archive_details.outputs.SOURCE_PATH }}" -DestinationPath "${{ steps.archive_details.outputs.ARCHIVE_NAME }}" -Force
 
     - name: Archive output (TAR.GZ)
       if: matrix.archive_format == 'tar.gz'
       shell: bash
       run: |
-        cd ./publish/${{ matrix.rid }}
-        executable=$(find . -name 'context2cb' -print -quit)
-        if [ -n "$executable" ]; then
-          # Použijeme github.ref_name, což je název tagu (např. v1.0.0)
-          tar czvf ../../context2cb-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.tar.gz $executable
-        else
-          echo "Executable 'context2cb' not found in $(pwd)"
-          exit 1
-        fi
-        cd ../../
+        tar czvf "${{ steps.archive_details.outputs.ARCHIVE_NAME }}" -C "$(dirname "${{ steps.archive_details.outputs.SOURCE_PATH }}")" "$(basename "${{ steps.archive_details.outputs.SOURCE_PATH }}")"
 
-    # Akce ncipollo/release-action je robustnější a umí vytvořit/aktualizovat release
-    # spojený s tagem a nahrát k němu assety.
-    - name: Create or Update Release with Assets
-      uses: ncipollo/release-action@v1 # Nahrazení původní akce
+    # --- NAHRÁNÍ JAKO BUILD ARTEFAKT ---
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4
       with:
-        # Token se předá automaticky
-        # Název tagu se vezme automaticky z github.ref_name
-        # artifactErrorsFailBuild: true # Můžeš nastavit, aby selhání nahrání artefaktu selhalo celý build
-        allowUpdates: true # Explicitně povolí aktualizaci existujícího release
-        artifacts: "./context2cb-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.${{ matrix.archive_format }}" # Cesta k archivu, který se má nahrát
-        # Můžeš přidat další volby, např. draft: false, prerelease: contains(github.ref, '-'), generateReleaseNotes: true
+        name: context2cb-archives-${{ matrix.artifact_suffix }} # Název artefaktu (může být jiný než název souboru)
+        path: ${{ steps.archive_details.outputs.ARCHIVE_NAME }} # Cesta k archivu k nahrání
+
+  # --- JOB 2: Vytvoření Release a Nahrání Assetů ---
+  release:
+    # Spustí se až po úspěšném dokončení VŠECH 'build' jobů v matrixu
+    needs: build
+    runs-on: ubuntu-latest # Může běžet na jakémkoliv OS, ubuntu je běžné
+    name: Create GitHub Release
+
+    steps:
+      # Stáhnout VŠECHNY build artefakty z 'build' jobu
+      # Stáhnou se do adresářů pojmenovaných podle `name` v upload-artifact
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        # Není potřeba specifikovat jméno, stáhne všechny z tohoto workflow run
+
+      # Přesunout/přejmenovat stažené soubory do jednoho adresáře pro snazší upload (volitelné, ale přehledné)
+      - name: Prepare artifacts for upload
+        shell: bash
+        run: |
+          mkdir release-assets
+          # Najít všechny archivy ve stažených adresářích a přesunout je
+          find . -maxdepth 2 -name 'context2cb-*.zip' -exec mv {} release-assets/ \;
+          find . -maxdepth 2 -name 'context2cb-*.tar.gz' -exec mv {} release-assets/ \;
+          echo "--- Files in release-assets: ---"
+          ls -l release-assets
+
+      # Vytvořit/aktualizovat release a nahrát VŠECHNY assety najednou
+      - name: Create or Update Release with Assets
+        uses: ncipollo/release-action@v1
+        with:
+          # Token se předá automaticky
+          allowUpdates: true # Povolí aktualizaci, pokud release pro tag už existuje
+          # artifacts: ./release-assets/context2cb-*.zip,./release-assets/context2cb-*.tar.gz # Glob pattern pro všechny assety
+          artifact: release-assets/* # Jednodušší glob
+          generateReleaseNotes: true # Volitelně generovat poznámky
+          # draft: false # Publikovat rovnou
+          # prerelease: contains(github.ref_name, '-') # Označit jako pre-release, pokud tag obsahuje '-'
