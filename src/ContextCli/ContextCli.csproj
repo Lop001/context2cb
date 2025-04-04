@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>context2cb</AssemblyName>
-    <Version>1.0.3</Version>
+    <Version>1.0.4</Version>
     <Authors>Lop001</Authors>
     <Product>context2cb</Product>
     <Description>Copies project context to clipboard for AI prompts.</Description>
