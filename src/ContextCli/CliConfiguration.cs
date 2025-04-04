@@ -35,6 +35,7 @@ public class CliConfiguration
 
     public static List<string> GetDefaultIgnorePatterns() => new List<string>
     {
+        "**/.contextcli.json",
         "**/bin/**",
         "**/obj/**",
         "**/node_modules/**",
