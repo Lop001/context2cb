@@ -32,7 +32,7 @@ namespace ContextCli.Utils
 
             var result = "";
             // All but the last element determine the prefix
-            for (int i = 0; i < parentIsLastStack.Count - 1; i++)
+            for (int i = 0; i < parentIsLastStack.Count; i++)
             {
                 result += parentIsLastStack[i] ? "    " : "│   ";
             }
