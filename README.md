@@ -2,6 +2,7 @@
 
 `context2cb` is a command-line utility designed to help software developers quickly gather project context (file structure and relevant code content) and copy it to the clipboard. This is particularly useful for pasting into AI/LLM prompts (like ChatGPT, Claude, Copilot, etc.) to provide them with the necessary background information about a codebase.
 
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/Lop001/context2cb)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## The Problem
@@ -37,7 +38,15 @@ When working with Large Language Models for coding assistance, debugging, or doc
 
 ## Installation
 
-### Build from Source
+### Option 1: Pre-compiled Binaries (Recommended)
+
+1.  Download the latest release executable for your operating system from the [Releases](https://github.com/Lop001/context2cb/releases) page. <!-- Update this link -->
+2.  Place the downloaded executable (`context2cb.exe` on Windows, `context2cb` on macOS/Linux) in a directory that is included in your system's `PATH` environment variable.
+
+    *   **Windows:** You can place it in `C:\Windows`, a custom tools directory added to `PATH`, or use `winget` / `scoop` if a package becomes available.
+    *   **macOS/Linux:** Common locations include `/usr/local/bin` or `~/bin` (if `~/bin` is in your `PATH`). Make sure the file is executable (`chmod +x context2cb`).
+
+### Option 2: Build from Source
 
 See the [Building from Source](#building-from-source) section below.
 
