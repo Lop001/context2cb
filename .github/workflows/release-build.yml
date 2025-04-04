@@ -91,5 +91,6 @@ jobs:
         # Token se předá automaticky
         # Název tagu se vezme automaticky z github.ref_name
         # artifactErrorsFailBuild: true # Můžeš nastavit, aby selhání nahrání artefaktu selhalo celý build
+        allowUpdates: true # Explicitně povolí aktualizaci existujícího release
         artifacts: "./context2cb-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.${{ matrix.archive_format }}" # Cesta k archivu, který se má nahrát
         # Můžeš přidat další volby, např. draft: false, prerelease: contains(github.ref, '-'), generateReleaseNotes: true
