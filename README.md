@@ -96,6 +96,7 @@ context2cb path/to/your/file.cs
     ```bash
     context2cb --max-size 500 # Ignore files > 500 KB
     ```
+*    `--directory` or `-dir`: Optional path to a directory to process.
 *   `--help` or `-h`: Display help information.
 
 ### Configuration Management (`config` command)
