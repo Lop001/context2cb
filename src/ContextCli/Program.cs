@@ -17,7 +17,8 @@ namespace ContextCli
             var rootCommand = new RootCommand("ContextCli: Copies project context (file structure and contents) to the clipboard for AI prompts.")
             {
                 // Argument for optional single file input
-                new Argument<FileInfo?>("file", () => null, "Optional path to a single file to copy its content.")
+                new Argument<FileInfo?>("file", () => null, "Optional path to a single file to copy its content."),
+
             };
 
             // -- Global options (valid for main command) --
@@ -46,6 +47,12 @@ namespace ContextCli
                 "--no-content",
                 description: "Copy only the file structure tree, without file contents.");
 
+             var dirOption = new Option<DirectoryInfo?>( // nullable int
+                aliases: new[] { "--directory", "-dir" },
+                description: "Optional path to a directory to process.");
+
+
+            rootCommand.AddGlobalOption(dirOption);
             rootCommand.AddGlobalOption(ignoreOption);
             rootCommand.AddGlobalOption(noIgnoreOption);
             rootCommand.AddGlobalOption(depthOption);
@@ -57,6 +64,7 @@ namespace ContextCli
             rootCommand.SetHandler(async (context) =>
             {
                 var fileInfo = context.ParseResult.GetValueForArgument(rootCommand.Arguments.OfType<Argument<FileInfo?>>().First());
+                var directoryInfo = context.ParseResult.GetValueForOption(dirOption);
                 var ignorePatterns = context.ParseResult.GetValueForOption(ignoreOption);
                 var noIgnore = context.ParseResult.GetValueForOption(noIgnoreOption);
                 var depth = context.ParseResult.GetValueForOption(depthOption);
@@ -64,7 +72,7 @@ namespace ContextCli
                 var maxSize = context.ParseResult.GetValueForOption(maxSizeOption);
                 var noContent = context.ParseResult.GetValueForOption(noContentOption);
 
-                await HandleMainExecution(fileInfo, ignorePatterns ?? Array.Empty<string>(), noIgnore, depth, useStdout, maxSize, noContent);
+                await HandleMainExecution(fileInfo, directoryInfo, ignorePatterns ?? Array.Empty<string>(), noIgnore, depth, useStdout, maxSize, noContent);
             });
 
 
@@ -163,7 +171,7 @@ namespace ContextCli
 
         // --- Main Logic  ---
 
-        private static async Task HandleMainExecution(FileInfo? fileInfo, string[] cliIgnorePatterns, bool noIgnore, int? depth, bool useStdout, int? cliMaxSizeKb, bool noContent)
+        private static async Task HandleMainExecution(FileInfo? fileInfo, DirectoryInfo? directoryInfo, string[] cliIgnorePatterns, bool noIgnore, int? depth, bool useStdout, int? cliMaxSizeKb, bool noContent)
         {
             var stopwatch = Stopwatch.StartNew(); // Measuring time
 
@@ -171,7 +179,7 @@ namespace ContextCli
             if (fileInfo != null)
             {
                 Console.WriteLine($"Processing single file: {fileInfo.FullName}");
-                if (!fileInfo.Exists)
+                if (!fileInfo.Exists && directoryInfo == null)
                 {
                     Console.ForegroundColor = ConsoleColor.Red;
                     Console.Error.WriteLine($"Error: File not found: {fileInfo.FullName}");
@@ -194,6 +202,11 @@ namespace ContextCli
                     Console.ResetColor();
                 }
                 return;
+            }
+            else if (directoryInfo != null)
+            {
+                // Change current directory to the specified one
+                Environment.CurrentDirectory = directoryInfo.FullName;
             }
 
             // --- Directory mode ---
